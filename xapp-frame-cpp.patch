@@ -1,0 +1,645 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index bddbaf1..6951243 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -157,7 +157,7 @@ set ( srcd "${CMAKE_CURRENT_SOURCE_DIR}" )
+ # enable code to find them after we build them.
+ #
+ #include_directories( "${srcd}/src/messaging;${srcd}/src/json;${srcd}/src/alarm;${srcd}/src/metrics;${srcd}/src/config;${srcd}/ext/jsmn" )
+-include_directories( "${srcd}/src/messaging;${srcd}/src/json;${srcd}/src/alarm;${srcd}/src/metrics;${srcd}/src/config;${srcd}/ext/jsmn;;${srcd}/src/model;${srcd}/src/rest-client;${srcd}/src/rest-server" )
++include_directories( "${srcd}/src/messaging;${srcd}/src/json;${srcd}/src/alarm;${srcd}/src/metrics;${srcd}/src/config;${srcd}/ext/jsmn;${srcd}/src/model;${srcd}/src/rest-client;${srcd}/src/rest-server" )
+
+ # Compiler flags
+ #
+diff --git a/Dockerfile b/Dockerfile
+index bc7b63e..ddfe5dd 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -108,7 +108,13 @@ RUN cp /usr/local/lib/x86_64-linux-gnu/pkgconfig/libpistache.pc /usr/local/lib/p
+ RUN git clone https://github.com/nlohmann/json.git && cd json && cmake . && make install
+
+ #install json-schema-validator
+-RUN git clone https://github.com/pboettch/json-schema-validator.git && cd json-schema-validator && git checkout cae6fad80001510077a7f40e68477a31ec443add &&mkdir build &&cd build && cmake .. && make install
++RUN git clone https://github.com/pboettch/json-schema-validator.git && \
++    cd json-schema-validator && \
++    git checkout cae6fad80001510077a7f40e68477a31ec443add && \
++    mkdir build && \
++    cd build && \
++    cmake .. && \
++    make install
+
+ #copy the content as git repo inside the container.
+ #COPY ${SRC}/CMakeLists.txt /playpen/factory/
+@@ -137,14 +143,14 @@ RUN cd /playpen/factory/test; bash unit_test.sh
+ # -----  final, smaller image ----------------------------------
+ #FROM ubuntu:20.04
+ FROM nexus3.o-ran-sc.org:10002/o-ran-sc/bldr-ubuntu20-c-go:1.0.0
+-# must add compile tools to make it a builder environmnent. If a build environment isn't needed
++# must add compile tools to make it a builder environmnent. If a build environment isn't needed
+ # comment out the next line and reduce the image size by more than 180M.
+ #
+ RUN apt-get update && apt-get install -y --no-install-recommends make g++
+
+ # if bash doesn't cut it for run_replay grab a real shell and clean up as much as we can
+ #RUN apt-get update; apt-get install -y ksh
+-RUN rm -fr /var/lib/apt/lists
++RUN rm -fr /var/lib/apt/lists
+
+ RUN mkdir -p /usr/local/include/ricxfcpp
+ COPY --from=buildenv /usr/local/lib /usr/local/lib/
+diff --git a/src/config/config.cpp b/src/config/config.cpp
+index ab44693..44e066e 100644
+--- a/src/config/config.cpp
++++ b/src/config/config.cpp
+@@ -357,6 +357,35 @@ double xapp::Config::Get_control_value( const std::string& name ) const {
+ 	return Get_control_value( name, 0.0 );
+ }
+
++std::string Config::Get_name() const {
++	return jh->String("xapp_name");
++}
++
++std::string Config::Get_version() const {
++    return jh->String("version");
++}
++
++std::vector<int> Config::Get_policies() const {
++	int nele = 0;
++	double v;
++	std::vector<int> rv;
++
++	jh->Unset_blob();
++	if( jh->Set_blob( "rmr" ) ) {
++		nele = jh->Array_len( "policies" );
++		for( int i = 0; i < nele; i++ ) {
++			if ( jh->Is_value_ele( "policies", i ) ) {	// this element must be integer
++				v = jh->Value_ele( "policies", i );
++				rv.emplace_back( (int) v );
++			} else {
++				fprintf( stderr, "<XFCPP> ### ERR ### policy element at idx %d must be an integer value\n", i );
++			}
++		}
++	}
++	jh->Unset_blob();
++
++    return rv;
++}
+
+ // ---- notification support ---------------------------------------------------------------
+
+diff --git a/src/config/config.hpp b/src/config/config.hpp
+index 88234dc..74f77cf 100644
+--- a/src/config/config.hpp
++++ b/src/config/config.hpp
+@@ -32,6 +32,7 @@
+
+ #include <iostream>
+ #include <thread>
++#include <vector>
+
+ #include "jhash.hpp"
+ #include "config.hpp"
+@@ -72,6 +73,12 @@ class Config {
+
+ 		std::string Get_port( const std::string& name ) const;
+
++		std::string Get_name() const;
++		std::string Get_version() const;
++
++		std::vector<int> Get_policies() const;
++
++
+ 		void Set_callback( notify_callback usr_func, void* usr_data );
+ };
+
+diff --git a/src/json/jwrapper.c b/src/json/jwrapper.c
+index 865856a..6e4fb6b 100644
+--- a/src/json/jwrapper.c
++++ b/src/json/jwrapper.c
+@@ -99,7 +99,7 @@ static char* extract( char* buf, const jsmntok_t *jtoken ) {
+ 	adding a nil before the parser gets a chance to actually parse an
+ 	object.
+ */
+-static void pull( const char* dest, char* src, jsmntok_t* jtoken ) {
++static void pull( char* dest, char* src, jsmntok_t* jtoken ) {
+ 	memcpy( dest, &src[jtoken->start], jtoken->end - jtoken->start );
+ 	dest[jtoken->end - jtoken->start] = 0;
+ }
+@@ -310,12 +310,11 @@ void* parse_jobject( void* st, char *json, char* prefix ) {
+ 	if( DEBUG ) fprintf( stderr, "<DBUG>> tokens=%d\n", njtokens );
+ #if DEBUG > 1
+ 		for( di = 0; di < njtokens; di++ ) {
+-			wbuf[4096];
++			char wbuf[4096];
+ 			pull( wbuf, json, &jtokens[di] );
+ 			fprintf( stderr, "<DBUG> [%d] t=%d start=%d end=%d (%s)\n",
+ 				di, jtokens[di].type, jtokens[di].start, jtokens[di].end, wbuf );
+ 		}
+-	}
+ #endif
+
+ 	if( jtokens[0].type != JSMN_OBJECT ) {				// if it's not an object then we can't parse it.
+@@ -361,7 +360,7 @@ void* parse_jobject( void* st, char *json, char* prefix ) {
+
+ 					stop = jtokens[data_idx].end;		// calc step; must loop as it's NOT just simple size*2 b/c nested objects are var length
+ 					if( DEBUG ) fprintf( stderr, "<DBUG> computing step over object elements\n" );
+-					for( di = data_idx+1; di < njtokens-1  && jtokens[di].end < stop ; di++ ) {
++					for( di = data_idx+1; di < njtokens  && jtokens[di].end < stop ; di++ ) {
+ 						step++;
+ 						if( DEBUG ) {
+ 							fprintf( stderr, "\tskip: [%d] object element start=%d end=%d (%s)\n",
+@@ -405,7 +404,7 @@ void* parse_jobject( void* st, char *json, char* prefix ) {
+ 								parse_jobject( jarray[n].v.pv,  extract( json, &jtokens[data_idx]  ), "" );		// recurse across the object and build a new symtab
+ 								stop = jtokens[data_idx].end;									// same as before, must manually calc step
+ 								if( DEBUG ) fprintf( stderr, "<DBUG> computing step over object elements start=%d stop=%d\n", data_idx+1, stop );
+-								for( di = data_idx+1; di < njtokens-1  && jtokens[di].end < stop ; di++ ) {
++								for( di = data_idx+1; di < njtokens  && jtokens[di].end < stop ; di++ ) {
+ 									step++;
+ 									if( DEBUG > 1 ) {
+ 										fprintf( stderr, "\tskip: [%d] object element start=%d end=%d (%s)\n",
+diff --git a/src/messaging/messenger.cpp b/src/messaging/messenger.cpp
+index 446c3c4..adf379c 100644
+--- a/src/messaging/messenger.cpp
++++ b/src/messaging/messenger.cpp
+@@ -266,7 +266,7 @@ void xapp::Messenger::Listen( ) {
+ 				}
+ 			} else {
+ 				if( mbuf->state != RMR_ERR_TIMEOUT ) {
+-					fprintf( stderr, "<LISTENER> got  bad status: %d\n", mbuf->state );
++					fprintf( stderr, "<LISTENER> got bad status: %d\n", mbuf->state );
+ 				}
+ 			}
+ 		}
+diff --git a/src/rest-client/RestClient.cpp b/src/rest-client/RestClient.cpp
+index 12c8728..1b50545 100644
+--- a/src/rest-client/RestClient.cpp
++++ b/src/rest-client/RestClient.cpp
+@@ -43,7 +43,7 @@ namespace xapp
+                         */
+                         response_listener();
+
+-
++
+ 		}
+ 		catch (std::exception const & e)
+ 		{
+@@ -52,7 +52,7 @@ namespace xapp
+
+ 	}
+ 	cpprestclient::cpprestclient(std::string base_url,std::string response_url, std::function<void(web::http::http_request)>callback):listener{ utility::conversions::to_string_t(response_url) }{
+-
++
+ 		this->baseUrl= utility::conversions::to_string_t(base_url);
+                 this->Baseurl = base_url;
+                 try
+@@ -158,7 +158,7 @@ namespace xapp
+ 			nlohmann::json  j= nlohmann::json::parse(s);
+ 			xapp::model::SubscriptionResponse SResp;
+ 			xapp::model::from_json(j, SResp);
+-
++
+ 			//sanity check
+ 			nlohmann::json ans;
+ 			xapp::model::to_json(ans, SResp);
+@@ -169,7 +169,7 @@ namespace xapp
+ 			postJson.wait();
+ 		}
+ 		catch (const std::exception& e) {
+-
++
+ 			printf("Error exception:%s\n", e.what());
+ 		}
+ 		return res;
+@@ -234,7 +234,7 @@ namespace xapp
+ 			res.body = nlohmann::json::parse(s);
+ 			std::vector<xapp::model::XAppConfig> cfg;
+ 			xapp::model::from_json(res.body, cfg);
+-
++
+ 			//sanity check
+ 			nlohmann::json ans;
+ 			xapp::model::to_json(ans, cfg);
+@@ -312,14 +312,14 @@ namespace xapp
+ 				.then([&](web::http::http_response response) {
+
+ 					res.status_code = response.status_code();
+-					if (response.status_code() != 201) {
+-					throw std::runtime_error("Returned " + std::to_string(response.status_code()));
++					if (response.status_code() >= 300) {
++						throw std::runtime_error("Returned " + std::to_string(response.status_code()));
+ 					}
+-					ucout << response.to_string() << "\n";
++					// ucout << response.to_string() << "\n";
+ 					response.headers().set_content_type(U("application/json"));
+ 					return response.extract_json();
+ 			})
+-
++
+ 				.then([&](web::json::value jsonObject) {
+ 					//std::cout << "\nRecieved REST subscription response\n";
+ 					//std::wcout << jsonObject.serialize().c_str() << "\n";
+@@ -351,13 +351,13 @@ namespace xapp
+ 			return client.request(web::http::methods::DEL);
+ 		})
+
+-
++
+ 			.then([&](web::http::http_response response) {
+ 				res.status_code = response.status_code();
+-				if (response.status_code() != 204) {
++				if (response.status_code() >= 300) {
+ 					throw std::runtime_error("Returned " + std::to_string(response.status_code()));
+ 				}
+-				ucout << response.to_string() << "\n";
++				// ucout << response.to_string() << "\n";
+ 				response.headers().set_content_type(U("application/json"));
+ 				return response.extract_json();
+ 				//std::wcout << "Deleted: " << std::boolalpha << (response.status_code() == 204) << std::endl;
+@@ -389,22 +389,22 @@ namespace xapp
+
+ 			web::http::client::http_client client(this->baseUrl);
+
+-
++
+ 			return client.request(web::http::methods::GET, web::uri_builder(U("/")).append_path(utility::conversions::to_string_t(path)).to_string());
+ 		})
+ 			.then([&](web::http::http_response response) {
+
+ 			res.status_code = response.status_code();
+-			if (response.status_code() != 200) {
++			if (response.status_code() >= 300) {
+ 				throw std::runtime_error("Returned " + std::to_string(response.status_code()));
+ 			}
+-			ucout << response.to_string() << "\n";
++			// ucout << response.to_string() << "\n";
+ 			response.headers().set_content_type(U("application/json"));
+ 			return response.extract_json();
+ 		})
+
+ 			.then([&](web::json::value jsonObject) {
+-
++
+ 			//resp.body = jsonObject.serialize();
+ 			std::string s = utility::conversions::to_utf8string(jsonObject.serialize());
+ 			res.body = nlohmann::json::parse(s);
+diff --git a/src/rest-server/pistacheserver.cpp b/src/rest-server/pistacheserver.cpp
+index 7f7fed9..22b887b 100644
+--- a/src/rest-server/pistacheserver.cpp
++++ b/src/rest-server/pistacheserver.cpp
+@@ -18,10 +18,10 @@
+ #include"pistacheserver.h"
+ namespace xapp
+ {
+-
++
+ 	pistacheserver::pistacheserver(Pistache::Address addr,std::vector<std::string> method,std::vector<bool> static_routing,std::vector<bool> dynamic_routing)
+         : httpEndpoint(std::make_shared<Pistache::Http::Endpoint>(addr))
+-    {
++    {
+ 	this->t=new std::thread*[1];
+         this->method=method;
+ 	this->static_routing=static_routing;
+@@ -68,16 +68,16 @@ void pistacheserver::add_static_cb(std::unordered_map<int,usr_callback> cb)
+ {
+ 	this->cb_static=cb;
+ }
+-void pistacheserver::add_dynamic_cb(std::unordered_map<int,usr_callback> cb)
++void pistacheserver::add_dynamic_cb(std::unordered_map<int,usr_callback> cb)
+ {
+         this->cb_dynamic=cb;
+ }
+
+-    void pistacheserver::init(size_t thr = 2)
++    void pistacheserver::init(size_t thr = 2)
+     {
+        		 auto opts = Pistache::Http::Endpoint::options().threads(thr).flags(Pistache::Tcp::Options::ReuseAddr)/*.flags(Pistache::Tcp::Options::ReusePort)*/; // how many threads for the server
+        		 httpEndpoint->init(opts);
+-		assert(route_static.size()==stat_sz && route_dynamic.size()==dyn_sz); //no of true in satatic_routing and dynamic_routig should match with size of route_static and  route_dynamic respectively.
++		assert(route_static.size()==stat_sz && route_dynamic.size()==dyn_sz); //no of true in satatic_routing and dynamic_routig should match with size of route_static and  route_dynamic respectively.
+
+ 		assert(cb_static.size()==stat_sz && cb_dynamic.size()==dyn_sz); //no of true in satatic_routing and dynamic_routig should match with size of cb_static and cb_dynamic respectively.
+ 		for (int i=0;i<method.size();i++)
+@@ -95,7 +95,7 @@ void pistacheserver::add_dynamic_cb(std::unordered_map<int,usr_callback> cb)
+         	{
+             		setupRoutes_del(i+1);
+         	}
+-
++
+        		else
+         	{
+             		std::cout<<"Wrong Method called \n";
+@@ -130,7 +130,7 @@ void pistacheserver::add_dynamic_cb(std::unordered_map<int,usr_callback> cb)
+         auto search_d=route_dynamic.find(index);
+         auto cbs_search=cb_static.find(index);
+         auto cbd_search=cb_dynamic.find(index);
+-        assert (search_s!=route_static.end() || search_d!=route_dynamic.end());
++        assert (search_s!=route_static.end() || search_d!=route_dynamic.end());
+         if (static_routing[index-1])
+                 {
+ 		std::cout<<"static routing get"<<std::endl;
+@@ -154,7 +154,7 @@ void pistacheserver::add_dynamic_cb(std::unordered_map<int,usr_callback> cb)
+ 	auto search_d=route_dynamic.find(index);
+ 	auto cbs_search=cb_static.find(index);
+ 	auto cbd_search=cb_dynamic.find(index);
+-	assert (search_s!=route_static.end() || search_d!=route_dynamic.end());
++	assert (search_s!=route_static.end() || search_d!=route_dynamic.end());
+ 	if (static_routing[index-1])
+ 		{
+ 		std::cout<<"static routing post"<<std::endl;
+@@ -177,7 +177,7 @@ void pistacheserver::add_dynamic_cb(std::unordered_map<int,usr_callback> cb)
+         auto search_d=route_dynamic.find(index);
+         auto cbs_search=cb_static.find(index);
+         auto cbd_search=cb_dynamic.find(index);
+-        assert (search_s!=route_static.end() || search_d!=route_dynamic.end());
++        assert (search_s!=route_static.end() || search_d!=route_dynamic.end());
+         if (static_routing[index-1])
+                 {
+ 		std::cout<<"static routing delete"<<std::endl;
+diff --git a/src/xapp/xapp.cpp b/src/xapp/xapp.cpp
+index caec394..d4992fb 100644
+--- a/src/xapp/xapp.cpp
++++ b/src/xapp/xapp.cpp
+@@ -30,6 +30,8 @@
+
+ #include <string.h>
+ #include <unistd.h>
++#include <algorithm>
++#include <cctype>
+
+ #include <rmr/rmr.h>
+ #include <rmr/RIC_message_types.h>
+@@ -40,10 +42,175 @@
+
+ #include <messenger.hpp>
+ #include "xapp.hpp"
++#include "config.hpp"
++#include "RestClient.h"
++
++#include <nlohmann/json.hpp>
+
+ // --------------- private -----------------------------------------------------
+
++bool Xapp::registerXapp() {
++	xapp::Config config;	// FIXME = xapp::Config();
++	std::string xappversion = config.Get_version();
++	std::string config_data = config.Get_contents();
++	this->xapp_name = config.Get_name();
++
++	if (char *envptr = std::getenv("HOSTNAME")) {
++		this->xapp_id = envptr;
++	} else {
++		this->xapp_id = "localhost";
++	}
++
++	std::string plt_ns;
++	if (char *envptr = std::getenv("PLT_NAMESPACE")) {
++		plt_ns = envptr;
++	} else {
++		plt_ns = DEFAULT_PLT_NAMESPACE;
++	}
++
++	std::string xapp_ns;
++	if (char *envptr = std::getenv("APP_NAMESPACE")) {
++		xapp_ns = envptr;
++	} else {
++		xapp_ns = DEFAULT_APP_NAMESPACE;
++	}
++
++	std::stringstream ss;
++	// building rmr service name
++	ss << "service-" << xapp_ns << "-" << this->xapp_id << "-rmr." << xapp_ns;
++	std::string rmr_svc = ss.str();
++
++	// building http service name
++	ss.str("");
++	ss << "service-" << xapp_ns << "-" << this->xapp_id << "-http." << xapp_ns;
++	std::string http_svc = ss.str();
++
++	// building something like SERVICE_RICXAPP_{XAPP_NAME}_HTTP_SERVICE_PORT
++	ss.str("");
++	ss << "SERVICE_" << xapp_ns << "_" << this->xapp_name << "_HTTP_SERVICE_PORT";
++	std::string http_env = ss.str();
++	std::replace(http_env.begin(), http_env.end(), '-', '_');
++	std::transform(http_env.begin(), http_env.end(), http_env.begin(), [](unsigned char c){ return std::toupper(c); });
++
++	ss.str("");
++	ss << "SERVICE_" << xapp_ns << "_" << this->xapp_name << "_RMR_SERVICE_PORT";
++	std::string rmr_env = ss.str();
++	std::replace(rmr_env.begin(), rmr_env.end(), '-', '_');
++	std::transform(rmr_env.begin(), rmr_env.end(), rmr_env.begin(), [](unsigned char c){ return std::toupper(c); });
++
++	std::string http_endpoint;
++	if (char *envptr = std::getenv(http_env.c_str())) {
++		if (envptr == NULL) {
++			envptr = (char *)"8080";
++			fprintf(stderr, "<XFCPP> [WARN] env %s not found. Using default http default port %s", http_env.c_str(), envptr);
++		}
++		http_endpoint = http_svc + ":" + envptr;
++	}
++
++	std::string rmr_endpoint;
++	if (char *envptr = std::getenv(rmr_env.c_str())) {
++		if (envptr == NULL) {
++			envptr = (char *)"4560";
++			fprintf(stderr, "<XFCPP> [WARN] env %s not found. Using default rmr default port %s", rmr_env.c_str(), envptr);
++		}
++		rmr_endpoint = rmr_svc + ":" + envptr;
++	}
++
++	nlohmann::json jdata = {
++		{"appName", this->xapp_name},
++		{"appVersion", xappversion},
++		{"configPath", ""},
++		{"appInstanceName", this->xapp_id},
++		{"httpEndpoint", http_endpoint},
++		{"rmrEndpoint", rmr_endpoint},
++		{"config", config_data}
++	};
++
++	// fprintf(stderr, "<XFCPP> Registration request is %s\n", jdata.dump(2).c_str());	// FIXME include an ifdef debug clause
++
++	ss.str("");
++	ss << "http://service-" << plt_ns << "-appmgr-http." << plt_ns << ":8080";
++#ifdef UNIT_TEST
++	ss.str("http://localhost:8080");
++#endif
++
++	xapp::cpprestclient client(ss.str());
++	xapp::response_t response = client.do_post(jdata, "/ric/v1/register");
++
++	fprintf(stderr, "<XFCPP> Registration status code is %ld\n", response.status_code);
++	if (response.status_code != 201) {
++		return false;
++	}
++
++    return true;
++}
++
++bool Xapp::unregisterXApp() {
++	// xapp::Config config;	// FIXME = xapp::Config();
++	// std::string xappname = config.Get_name();
++
++	// std::string hostname;
++	// if (char *envptr = std::getenv("HOSTNAME")) {
++	// 	hostname = envptr;
++	// } else {
++	// 	hostname = "localhost";
++	// }
++
++	nlohmann::json jdata = {
++		{"appName", this->xapp_name},
++		{"appInstanceName", this->xapp_id}
++	};
+
++	// fprintf(stderr, "<XFCPP> Deregistration request is %s\n", jdata.dump(2).c_str());	// FIXME include an ifdef debug clause
++
++	std::string plt_ns;
++	if (char *envptr = std::getenv("PLT_NAMESPACE")) {
++		plt_ns = envptr;
++	} else {
++		plt_ns = DEFAULT_PLT_NAMESPACE;
++	}
++
++	std::stringstream ss;
++	ss << "http://service-" << plt_ns << "-appmgr-http." << plt_ns << ":8080";
++#ifdef UNIT_TEST
++	ss.str("http://localhost:8080");
++#endif
++	xapp::cpprestclient client(ss.str());
++
++	xapp::response_t response = client.do_post(jdata, "/ric/v1/deregister");
++
++	fprintf(stderr, "<XFCPP> Deregistration status code is %ld\n", response.status_code);
++	if (response.status_code != 204) {
++		return false;
++	}
++
++    return true;
++}
++
++bool Xapp::a1_policy_startup() {
++	xapp::Config config;
++	std::vector<int> policies = config.Get_policies();
++	int sent = 0;	// counter to figure out if at lease one policy has been sent
++
++    for (auto policy_id : policies) {
++		std::string policy_query = "{\"policy_type_id\":" + std::to_string(policy_id) + "}";
++
++		auto msg = Alloc_msg((int) policy_query.length());
++		auto payload = msg->Get_payload().get();
++
++		memcpy(payload, policy_query.c_str(), policy_query.length());
++
++		fprintf(stderr, "<XFCPP> [INFO] Sending request for policy id %d\n", policy_id);
++
++		if (msg->Send_msg(A1_POLICY_QUERY, RMR_VOID_SUBID, (int) policy_query.length(), NULL)) {
++			sent++;
++		} else {
++			fprintf(stderr, "<XFCPP> [ERROR] Unable to send request for policy id %d\n", policy_id);
++		}
++	}
++
++	return sent;
++}
+
+ // --------------- builders -----------------------------------------------
+
+@@ -54,8 +221,8 @@
+
+ 	If port is nil, then the default port is used (4560).
+ */
+-Xapp::Xapp( const char* port, bool wait4table ) : Messenger( port, wait4table ) {
+-	// nothing to do; all handled in Messenger constructor
++Xapp::Xapp(const char* port, bool wait4table) : Messenger(port, wait4table) {
++
+ }
+
+ /*
+@@ -77,13 +244,31 @@ void Xapp::Run( int nthreads ) {
+
+ 	tinfo = new std::thread* [nthreads-1];
+
+-	for( i = 0; i < nthreads - 1; i++ ) {				// thread for each n-1; last runs here
++	// for( i = 0; i < nthreads - 1; i++ ) {				// thread for each n-1; last runs here
++	for( i = 0; i < nthreads; i++ ) {
+ 		tinfo[i] = new std::thread( &Xapp::Listen, this );
+ 	}
+
+-	this->Listen();						// will return only when halted
++	// this->Listen();						// will return only when halted
++	// sleep(5);	// FIXME remove
++
++	if (!this->Wait_for_cts(30)) {	// we have to wait for rmr to initialize to register the xApp (max 30s)
++		fprintf(stderr, "<XFCPP> RMR seems not to be fully initialized, trying to register anyway\n");
++	}
+
+-	for( i = 0; i < nthreads - 1; i++ ) {				// wait for others to stop
++	if (registerXapp()) {
++		fprintf(stderr, "<XFCPP> xApp has been registered\n");
++	} else {
++		fprintf(stderr, "<XFCPP> xApp was unable to register\n");
++	}
++
++	sleep(2);	// we have to wait for RTMGR to populate routing tables to A1 Mediator to proceed with policy startup
++	if (!a1_policy_startup()) {
++		fprintf(stderr, "<XFCPP> ### ERR ### unable to startup A1 policies\n");
++	}
++
++	// for( i = 0; i < nthreads - 1; i++ ) {				// wait for others to stop	// FIXME remove
++	for( i = 0; i < nthreads; i++ ) {
+ 		tinfo[i]->join();
+ 	}
+
+@@ -95,6 +280,12 @@ void Xapp::Run( int nthreads ) {
+ 	active listeners from running, and will shut things down.
+ */
+ void Xapp::Halt() {
++	if (unregisterXApp()) {
++		fprintf(stderr, "<XFCPP> xApp has been deregistered\n");
++	} else {
++		fprintf(stderr, "<XFCPP> xApp was unable to deregister\n");
++	}
++
+ 	this->Stop();			// messenger shut off
+ }
+
+diff --git a/src/xapp/xapp.hpp b/src/xapp/xapp.hpp
+index a00a1dc..b19f133 100644
+--- a/src/xapp/xapp.hpp
++++ b/src/xapp/xapp.hpp
+@@ -42,22 +42,33 @@
+ #include "callback.hpp"
+ #include "messenger.hpp"
+
++#define DEFAULT_PLT_NAMESPACE "ricplt"
++#define DEFAULT_APP_NAMESPACE "ricxapp"
++
+ class Xapp : public xapp::Messenger {
+
+ 	private:
+-		std::string name;
++		std::string xapp_name;	// populated in registration
++		std::string xapp_id;	// populated in registration
+
+ 		// copy and assignment are PRIVATE because we cant "clone" the listen environment
+ 		Xapp( const Xapp& soi );
+ 		Xapp& operator=( const Xapp& soi );
+
++		bool registerXapp();
++		bool unregisterXApp();
++		bool a1_policy_startup();
++
++
+ 	public:
+ 		Xapp( const char* listen_port, bool wait4rt );	// builder
+-		Xapp( );
+ 		~Xapp();									// destroyer
+
+ 		void Run( int nthreads );					// message listen driver
+ 		void Halt( );								// force to stop
++
++		std::string const &getXappName() const { return xapp_name; };
++		std::string const &getXappId() const { return xapp_id; };
+ };
+
+ #endif
