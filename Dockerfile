@@ -50,7 +50,6 @@ ARG MDC_VER=0.1.4-1
 RUN wget --content-disposition "https://packagecloud.io/o-ran-sc/release/packages/debian/stretch/mdclog_${MDC_VER}_amd64.deb/download.deb?distro_version_id=149" && \
     wget --content-disposition "https://packagecloud.io/o-ran-sc/release/packages/debian/stretch/mdclog-dev_${MDC_VER}_amd64.deb/download.deb?distro_version_id=149"
 
-COPY *.deb /playpen
 RUN dpkg -i /playpen/*.deb
 
 # clone xapp-frame-cpp and apply patch
