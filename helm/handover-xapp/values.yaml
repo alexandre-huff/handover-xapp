@@ -60,7 +60,7 @@ fullname: {}
 ###############    The following are from the xApp descriptor     ###############
 containers:
 - image:
-    name: handover-xapp
+    name: zanattabruno/handover-xapp
     registry: registry.hub.docker.com
     tag: latest
   name: handover-xapp
