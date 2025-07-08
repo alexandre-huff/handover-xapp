@@ -26,6 +26,7 @@ typedef struct {
     std::string mcc;
     std::string mnc;
     std::string e2_node_id;
+    std::string pci;
     std::vector<std::string> ues;   // list of imsi values
 } e2_node_policy_t;
 

@@ -35,23 +35,6 @@ private:
     std::string baseUrl;
     std::unordered_map<std::string, std::string> e2nodes; // connected e2nodes concat(plmnid+nbId) are the keys and inventoryName is the value
 
-    // FIXME what if <<<<<<<<<<<  map into map and use the default cpp hash functions <<<<<<<<<<<
-    /*
-                                            plmnid                nbId    inventoryName
-        using Unordered_map = unordered_map<string, unordered_map<string, string>>;
-
-        Unordered_map um;
-        um["Region1"]["Candidate1"] = 10;
-        cout << um["Region1"]["Candidate1"];    // 10
-    */
-
-   // FIXME another posibility would be concatenate the plmnid and nbId in a string and then use it as the key (seems easy)
-   /*
-                 plmnid+nbid, inventoryName
-        unordered_map<string, string>cl
-   */
-
-
 };
 
 

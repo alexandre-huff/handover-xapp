@@ -31,7 +31,7 @@ extern "C" {
 }
 
 E2SM_RC_ControlHeader_t *generate_e2sm_rc_control_header_fmt1(const std::string &imsi);
-E2SM_RC_ControlMessage_t *generate_e2sm_rc_control_message_fmt1(const std::string &mcc, const std::string &mnc, const std::string &e2_node_id);
+E2SM_RC_ControlMessage_t *generate_e2sm_rc_control_message_fmt1(const std::string &mcc, const std::string &mnc, const uint32_t e2_node_id, const uint16_t pci);
 E2AP_PDU_t *generate_ric_control_request(RANfunctionID_t func_id, RICcontrolHeader_t *header, RICcontrolMessage_t *msg);
 
 

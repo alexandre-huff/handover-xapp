@@ -25,7 +25,10 @@ extern "C" {
     #include "OCTET_STRING.h"
     #include "PLMN-Identity.h"
     #include "BIT_STRING.h"
+    #include "NR-CGI.h"
 }
+
+#define GNB_ID_LENGTH 29
 
 namespace e2 {
 namespace utils {
@@ -35,6 +38,9 @@ namespace utils {
     PLMN_Identity_t *encodePlmnId(const char *mcc, const char *mnc);
     bool decodePlmnId(PLMN_Identity_t *plmnid, std::string &mcc, std::string &mnc);
     bool decode_plmnid_to_hex(const PLMN_Identity_t *plmnid, std::string &hex_plmnid);
+
+    NR_CGI_t *encode_NR_CGI(const std::string &mcc, const std::string &mnc, const uint32_t gnb_id, const uint16_t pci);
+    bool decode_NR_CGI(const NR_CGI_t *nr_cgi, std::string &mcc, std::string &mnc, uint32_t &gnb_id, uint16_t &pci);
 }
 }
 

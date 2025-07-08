@@ -108,7 +108,7 @@ E2SM_RC_ControlHeader_t *generate_e2sm_rc_control_header_fmt1(const std::string 
     return header;
 }
 
-E2SM_RC_ControlMessage_t *generate_e2sm_rc_control_message_fmt1(const std::string &mcc, const std::string &mnc, const std::string &e2_node_id) {
+E2SM_RC_ControlMessage_t *generate_e2sm_rc_control_message_fmt1(const std::string &mcc, const std::string &mnc, const uint32_t e2_node_id, const uint16_t pci) {
     E2SM_RC_ControlMessage_t *msg  = (E2SM_RC_ControlMessage_t *) calloc(1, sizeof(E2SM_RC_ControlMessage_t));
     msg->ric_controlMessage_formats.present = E2SM_RC_ControlMessage__ric_controlMessage_formats_PR_controlMessage_Format1;
     msg->ric_controlMessage_formats.choice.controlMessage_Format1 =
@@ -170,36 +170,23 @@ E2SM_RC_ControlMessage_t *generate_e2sm_rc_control_message_fmt1(const std::strin
         (RANParameter_ValueType_Choice_ElementFalse_t *) calloc(1, sizeof(RANParameter_ValueType_Choice_ElementFalse_t));
     param4->ranParameter_valueType->choice.ranP_Choice_ElementFalse->ranParameter_value =
         (RANParameter_Value_t *) calloc(1, sizeof(RANParameter_Value_t));
-    param4->ranParameter_valueType->choice.ranP_Choice_ElementFalse->ranParameter_value->present = RANParameter_Value_PR_valueOctS; // FIXME check if OctetString
+    param4->ranParameter_valueType->choice.ranP_Choice_ElementFalse->ranParameter_value->present = RANParameter_Value_PR_valueOctS;
 
-    NR_CGI_t *nr_cgi = (NR_CGI_t *) calloc(1, sizeof(NR_CGI_t));
-    PLMNIdentity_t *plmnid = e2::utils::encodePlmnId(mcc.c_str(), mnc.c_str());
-    nr_cgi->pLMNIdentity = *plmnid;
-    if (plmnid) free(plmnid);
-
-    nr_cgi->nRCellIdentity.buf = (uint8_t *) calloc(5, sizeof(uint8_t)); // we need to allocate 40 bits to store 36 bits
-    nr_cgi->nRCellIdentity.size = 5;
-    nr_cgi->nRCellIdentity.bits_unused = 4; // 40 - 4 = 36 bits
-    // we do not consider cell here, so the cell value is 0. Thus, NCI = gnbId * 2^(36-29) + cellid
-    // we leave 7 bits for cellid
-    unsigned long gnb_id = std::stoul(e2_node_id, nullptr, 10);
-    uint64_t nci = gnb_id * 128;    // 36 - 29 = 7, and 2^7 is 128, and 128 + 0(cellid) = 128. Thus, nci = gnb_id * 128
-
-    nci = nci << nr_cgi->nRCellIdentity.bits_unused;    // we need to put the first byte at the 40th position (36 + 4) in the bit string
-    nr_cgi->nRCellIdentity.buf[0] = (nci >> 32) & 0xFF;
-    nr_cgi->nRCellIdentity.buf[1] = (nci >> 24) & 0xFF;
-    nr_cgi->nRCellIdentity.buf[2] = (nci >> 16) & 0xFF;
-    nr_cgi->nRCellIdentity.buf[3] = (nci >> 8) & 0xFF;
-    nr_cgi->nRCellIdentity.buf[4] = nci & 0xFF;
-    // TODO check https://nrcalculator.firebaseapp.com/nrgnbidcalc.html
-    // TODO check https://www.telecomhall.net/t/what-is-the-formula-for-cell-id-nci-in-5g-nr-networks/12623/2
-
-    OCTET_STRING_t *nrcgi_data = e2::utils::asn1_check_and_encode(&asn_DEF_NR_CGI, nr_cgi);
-    if (!nrcgi_data) {
+    NR_CGI_t *nr_cgi = e2::utils::encode_NR_CGI(mcc, mnc, e2_node_id, pci);
+    if (!nr_cgi) {
         mdclog_write(MDCLOG_ERR, "Unable to encode NR CGI in E2SM RC Control Message Format 1");
         ASN_STRUCT_FREE(asn_DEF_E2SM_RC_ControlHeader_Format1, msg);
         return nullptr;
     }
+
+    OCTET_STRING_t *nrcgi_data = e2::utils::asn1_check_and_encode(&asn_DEF_NR_CGI, nr_cgi);
+    if (!nrcgi_data) {
+        mdclog_write(MDCLOG_ERR, "Unable to encode NR CGI into OCTET_STRING");
+        ASN_STRUCT_FREE(asn_DEF_E2SM_RC_ControlHeader_Format1, msg);
+        return nullptr;
+    }
+
+    ASN_STRUCT_FREE(asn_DEF_OCTET_STRING, nr_cgi);
 
     param4->ranParameter_valueType->choice.ranP_Choice_ElementFalse->ranParameter_value->choice.valueOctS.size = nrcgi_data->size;
     param4->ranParameter_valueType->choice.ranP_Choice_ElementFalse->ranParameter_value->choice.valueOctS.buf = nrcgi_data->buf;

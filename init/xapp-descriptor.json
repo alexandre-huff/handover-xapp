@@ -1,5 +1,5 @@
 {
-    "xapp_name": "handover-xapp",
+    "xapp_name": "debugger-xapp",
     "version": "1.0.0",
     "containers": [
         {
@@ -24,13 +24,14 @@
                 "container": "handover-xapp",
                 "port": 4560,
                 "rxMessages": [
-                    "RIC_SUB_RESP",
-                    "RIC_INDICATION",
-                    "RIC_SUB_DEL_RESP"
+                    "RIC_CONTROL_ACK",
+                    "RIC_CONTROL_FAILURE",
+                    "A1_POLICY_REQ"
                 ],
                 "txMessages": [
-                    "RIC_SUB_REQ",
-                    "RIC_SUB_DEL_REQ"
+                    "RIC_CONTROL_REQ",
+                    "A1_POLICY_QUERY",
+                    "A1_POLICY_RESP"
                 ],
                 "policies": [
                     5

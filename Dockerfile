@@ -1,4 +1,4 @@
-FROM nexus3.o-ran-sc.org:10002/o-ran-sc/bldr-ubuntu22-c-go:1.0.0 as buildenv
+FROM nexus3.o-ran-sc.org:10002/o-ran-sc/bldr-ubuntu22-c-go:1.0.0 AS buildenv
 
 RUN mkdir -p /playpen/handover-xapp
 
@@ -67,7 +67,8 @@ RUN cd xapp-frame-cpp \
     && cmake .. -DDEV_PKG=1 \
     && make -j`nproc` install \
     && cmake .. -DDEV_PKG=0 \
-    && make -j`nproc` install
+    && make -j`nproc` install \
+    && ldconfig
 
 COPY . /playpen/handover-xapp/
 
@@ -102,4 +103,4 @@ ENV RMR_SEED_RT=/usr/local/etc/handover-xapp/routes.txt
 RUN ldconfig
 
 # CMD while true; do sleep 3600; done
-CMD handover-xapp
+CMD ["handover-xapp"]

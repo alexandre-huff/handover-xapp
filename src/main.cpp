@@ -23,6 +23,7 @@
 #include <string.h>
 #include <sstream>
 #include <bitset>
+#include <cstdint>
 
 #include <ricxfcpp/xapp.hpp>
 #include <ricxfcpp/message.hpp>
@@ -67,23 +68,23 @@ void a1_policy_handler(xapp::Message &msg, int mtype, int subid, int payload_len
             }
 
             uint32_t nodeid = (uint32_t) std::strtoul(v.e2_node_id.c_str(), nullptr, 10);
-            if (nodeid > ((1 << 29) - 1)) { // we use 29 bits to identify an E2 Node
-                mdclog_write(MDCLOG_ERR, "E2 Node ID value of mcc=%s, mnc=%s in A1 Policy is higher than 29 bits", v.mcc.c_str(), v.mnc.c_str());
+            if (nodeid > ((1 << GNB_ID_LENGTH) - 1)) { // we use GNB_ID_LENGTH bits to identify an E2 Node
+                mdclog_write(MDCLOG_ERR, "E2 Node ID value of mcc=%s, mnc=%s in A1 Policy is higher than %d bits", v.mcc.c_str(), v.mnc.c_str(), GNB_ID_LENGTH);
                 error = true;
                 continue;
             }
-            std::string nodeid_bs = std::bitset<29>(nodeid).to_string();    // bit string
+            std::string nodeid_bs = std::bitset<GNB_ID_LENGTH>(nodeid).to_string();    // bit string
             std::string e2node = e2mgr.get_e2_node_inventory_name(hex_plmnid, nodeid_bs);
             if (e2node.empty()) {
-                mdclog_write(MDCLOG_ERR, "E2 Node mcc=%s, mnc=%s, and e2_node_id=%s with plmnid=%s, and nbId=%s seems to be unavailable",
+                mdclog_write(MDCLOG_ERR, "E2 Node mcc=%s, mnc=%s, and gnbid=%s with plmnid=%s, and nbId=%s seems to be unavailable",
                     v.mcc.c_str(), v.mnc.c_str(), v.e2_node_id.c_str(), hex_plmnid.c_str(), nodeid_bs.c_str());
                 error = true;
                 continue;
             }
 
             for (auto &imsi : v.ues) {
-                mdclog_write(MDCLOG_DEBUG, "Handing over UE=%s to E2Node mcc=%s, mnc=%s, e2nodeid=%s",
-                    imsi.c_str(), v.mcc.c_str(), v.mnc.c_str(), v.e2_node_id.c_str());
+                mdclog_write(MDCLOG_DEBUG, "Handing over UE=%s to E2Node mcc=%s, mnc=%s, gnbid=%s, pci=%s",
+                    imsi.c_str(), v.mcc.c_str(), v.mnc.c_str(), v.e2_node_id.c_str(), v.pci.c_str());
 
                 E2SM_RC_ControlHeader_t *header_fmt1 = generate_e2sm_rc_control_header_fmt1(imsi);
                 if (!header_fmt1) {
@@ -91,10 +92,12 @@ void a1_policy_handler(xapp::Message &msg, int mtype, int subid, int payload_len
                     error = true;
                     continue;
                 }
-                E2SM_RC_ControlMessage_t *msg_fmt1 = generate_e2sm_rc_control_message_fmt1(v.mcc, v.mnc, v.e2_node_id);
+                uint32_t gnbid = static_cast<uint32_t>(std::stoul(v.e2_node_id));
+                uint16_t pci = static_cast<uint16_t>(std::stoul(v.pci));
+                E2SM_RC_ControlMessage_t *msg_fmt1 = generate_e2sm_rc_control_message_fmt1(v.mcc, v.mnc, gnbid, pci);
                 if (!msg_fmt1) {
-                    mdclog_write(MDCLOG_ERR, "Unable to generate E2SM RC Control Message Format 1 from mcc=%s, mnc=%s, e2_node_id=%s",
-                        v.mcc.c_str(), v.mnc.c_str(), v.e2_node_id.c_str());
+                    mdclog_write(MDCLOG_ERR, "Unable to generate E2SM RC Control Message Format 1 from mcc=%s, mnc=%s, gnbid=%u, pci=%u",
+                        v.mcc.c_str(), v.mnc.c_str(), gnbid, pci);
                     error = true;
                     continue;
                 }
@@ -104,7 +107,7 @@ void a1_policy_handler(xapp::Message &msg, int mtype, int subid, int payload_len
                     error = true;
                     continue;
                 }
-                // asn_fprint(stderr, &asn_DEF_E2SM_RC_ControlMessage, msg_fmt1);   // FIXME remove
+
                 RICcontrolMessage_t *ctrl_msg = e2::utils::asn1_check_and_encode(&asn_DEF_E2SM_RC_ControlMessage, msg_fmt1);
                 if (!ctrl_msg) {
                     mdclog_write(MDCLOG_ERR, "Unable to encode E2SM RC Control Message Format 1");
@@ -125,16 +128,16 @@ void a1_policy_handler(xapp::Message &msg, int mtype, int subid, int payload_len
                     continue;
                 }
 
-                mdclog_write(MDCLOG_INFO, "Sending Handover Request for UE=%s to E2Node mcc=%s, mnc=%s, e2nodeid=%s",
-                    imsi.c_str(), v.mcc.c_str(), v.mnc.c_str(), v.e2_node_id.c_str());
+                mdclog_write(MDCLOG_INFO, "Sending Handover Request for UE=%s to E2Node mcc=%s, mnc=%s, gnbid=%u, pci=%u",
+                    imsi.c_str(), v.mcc.c_str(), v.mnc.c_str(), gnbid, pci);
 
 
                 std::shared_ptr<unsigned char> meid((unsigned char *)strdup(e2node.c_str()));
                 msg.Set_meid(meid);
 
                 if (!msg.Send_msg(RIC_CONTROL_REQ, RMR_VOID_SUBID, (int)data->size, (unsigned char *)data->buf)) {
-                    mdclog_write(MDCLOG_ERR, "Unable to send RIC Control Request to E2 Node mcc=%s, mnc=%s, e2_node_id=%s",
-                        v.mcc.c_str(), v.mnc.c_str(), v.e2_node_id.c_str());
+                    mdclog_write(MDCLOG_ERR, "Unable to send RIC Control Request to E2 Node mcc=%s, mnc=%s, gnbid=%u, pci=%u",
+                        v.mcc.c_str(), v.mnc.c_str(), gnbid, pci);
                     error = true;
                 }
 

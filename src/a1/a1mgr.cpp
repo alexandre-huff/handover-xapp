@@ -87,7 +87,8 @@ void A1Manager::parse_a1_payload() {
 		e2_node_policy_t e2_node;
 		e2_node.mcc = v["mcc"].GetString();
 		e2_node.mnc = v["mnc"].GetString();
-		e2_node.e2_node_id = v["nodebid"].GetString();
+		e2_node.e2_node_id = v["gnbid"].GetString();
+		e2_node.pci = v["pci"].GetString();
 
 		if (!v["UEList"].IsArray()) {
 			rapidjson::StringBuffer buffer;
