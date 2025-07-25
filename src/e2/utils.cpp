@@ -18,7 +18,7 @@
 
 #include "utils.hpp"
 
-#include <string>
+#include <sstream>
 #include <stdexcept>
 #include <mdclog/mdclog.h>
 
@@ -167,12 +167,16 @@ bool e2::utils::decode_plmnid_to_hex(const PLMN_Identity_t *plmnid, std::string 
         return false;
     }
 
-    hex_plmnid = std::to_string( (plmnid->buf[0] >> 4) & 0x0F );
-    hex_plmnid += std::to_string( plmnid->buf[0] & 0x0F );
-    hex_plmnid += std::to_string( (plmnid->buf[1] >> 4) & 0x0F );
-    hex_plmnid += std::to_string( plmnid->buf[1] & 0x0F );
-    hex_plmnid += std::to_string( (plmnid->buf[2] >> 4) & 0x0F );
-    hex_plmnid += std::to_string( plmnid->buf[2] & 0x0F );
+    std::stringstream ss;
+
+    ss << std::uppercase << std::hex << ( (plmnid->buf[0] >> 4) & 0x0F );
+    ss << std::uppercase << std::hex << ( plmnid->buf[0] & 0x0F );
+    ss << std::uppercase << std::hex << ( (plmnid->buf[1] >> 4) & 0x0F );
+    ss << std::uppercase << std::hex << ( plmnid->buf[1] & 0x0F );
+    ss << std::uppercase << std::hex << ( (plmnid->buf[2] >> 4) & 0x0F );
+    ss << std::uppercase << std::hex << ( plmnid->buf[2] & 0x0F );
+
+    hex_plmnid = ss.str();
 
     return true;
 }
